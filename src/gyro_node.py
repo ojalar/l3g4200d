@@ -7,6 +7,8 @@ import numpy as np
 import smbus
 import time
 from sensor_msgs.msg import Imu
+from geometry_msgs.msg import Quaternion
+from tf.transformations import quaternion_multiply
 
 # publish gyro readings from a L3G4200D
 def gyro():
@@ -15,6 +17,8 @@ def gyro():
     # create publisher
     pub = rospy.Publisher("gyro", Imu, queue_size=1)
     # define publish rate
+    f = 50
+    dt = 1/f
     rate = rospy.Rate(50)
     
     # Get I2C bus
@@ -39,11 +43,14 @@ def gyro():
     
     # initialise message
     msg = Imu()
+    msg.header.frame_id = "base_link"
     msg.orientation.x = 0
     msg.orientation.y = 0
     msg.orientation.z = 0
-    msg.orientation.w = 0
-    msg.orientation_covariance[0] = -1
+    msg.orientation.w = 1
+    msg.orientation_covariance[0] = 1
+    msg.orientation_covariance[4] = 1
+    msg.orientation_covariance[8] = 1
     msg.linear_acceleration.x = 0
     msg.linear_acceleration.y = 0
     msg.linear_acceleration.z = 0
@@ -51,6 +58,7 @@ def gyro():
     msg.angular_velocity_covariance[0] = 1
     msg.angular_velocity_covariance[4] = 1 
     msg.angular_velocity_covariance[8] = 1 
+    
     # sleep a bit to ensure gyro is ready
     time.sleep(0.5)
     
@@ -90,8 +98,17 @@ def gyro():
         if zGyro > 32767 :
                 zGyro -= 65536
         zGyro = np.radians(zGyro*dps_digit)
-        
+       
+        # update orientation by computing quaternion derivative, then integrating
+        # the derivative
+        # https://x-io.co.uk/downloads/madgwick_internal_report.pdf
+        w = np.array([xGyro, yGyro, zGyro, 0])
+        q = np.array([msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w])
+        q_dot = 0.5 * quaternion_multiply(q, w)
+        q_new = q + q_dot*dt
+    
         # insert data to message
+        msg.orientation = Quaternion(*q_new) 
         msg.angular_velocity.x = xGyro
         msg.angular_velocity.y = yGyro
         msg.angular_velocity.z = zGyro
